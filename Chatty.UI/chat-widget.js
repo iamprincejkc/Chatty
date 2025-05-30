@@ -108,9 +108,9 @@ class ChattyWidget extends HTMLElement {
                 <div id="messages"></div>
                 <input id="honeypot" type="text" style="display:none;" autocomplete="off" />
                 <input id="input" type="text" placeholder="Type a message..." />
-                 <div style="text-align: center; font-size: 11px; color: #aaa; padding: 8px;">
-                 Chatty — by <span style="font-weight: bold; color: #0084FF;">JKC</span>
-                 </div>
+                <div style="text-align: center; font-size: 11px; color: #aaa; padding: 8px;">
+                Chatty — by <span style="font-weight: bold; color: #0084FF;">JKC</span>
+                </div>
             </div>
         `;
 

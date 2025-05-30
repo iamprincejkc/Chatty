@@ -31,4 +31,9 @@ app.MapHub<ChatHub>("/chat-hub");
 
 app.UseHttpsRedirection();
 
+using (var scope = app.Services.CreateScope())
+{
+    var db = scope.ServiceProvider.GetRequiredService<ChatDbContext>();
+    db.Database.Migrate();
+}
 app.Run();
