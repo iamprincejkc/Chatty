@@ -10,4 +10,5 @@ public class ChatDbContext : DbContext
         : base(options) { }
 
     public DbSet<ChatMessage> ChatMessages => Set<ChatMessage>();
+    public DbSet<AgentSession> AgentSessions => Set<AgentSession>();
 }

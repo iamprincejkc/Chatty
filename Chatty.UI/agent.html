@@ -1,0 +1,175 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8" />
+    <title>Agent Chat Panel</title>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/microsoft-signalr/7.0.5/signalr.min.js"></script>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link rel="icon" href="https://static.thenounproject.com/png/4971895-200.png" type="image/png" />
+</head>
+
+<body class="bg-gray-100 min-h-screen flex flex-col">
+    <div class="flex-1">
+        <div class="max-w-3xl mx-auto bg-white shadow-lg rounded-lg p-6 space-y-4">
+            <h2 class="text-xl font-bold text-blue-600">Agent Chat Panel</h2>
+
+            <div>
+                <h3 class="text-md font-semibold text-gray-700 mb-2">Active Sessions</h3>
+                <ul id="session-list" class="space-y-1"></ul>
+            </div>
+
+            <div class="flex items-center gap-2">
+                <input id="session-id" class="flex-1 border px-3 py-2 rounded-md"
+                    placeholder="Paste or type a sessionId..." />
+                <button id="join-session"
+                    class="bg-blue-600 text-white px-4 py-2 rounded-md hover:bg-blue-700">Join</button>
+            </div>
+
+            <div id="messages" class="h-80 overflow-y-auto bg-gray-50 border p-4 rounded space-y-2 text-sm"></div>
+
+            <div class="flex items-center gap-2">
+                <input id="message-input" class="flex-1 border px-3 py-2 rounded-md" placeholder="Type your reply..." />
+                <button id="send-btn"
+                    class="bg-blue-600 text-white px-4 py-2 rounded-md hover:bg-blue-700">Send</button>
+            </div>
+        </div>
+    </div>
+
+    <footer class="text-center text-xs text-gray-500 py-4 border-t">
+        Chatty &mdash; Built with 💙 by <span class="font-semibold text-blue-600">JKC</span>
+    </footer>
+
+    <script>
+        let connection;
+        let sessionId = null;
+        let agentUser = localStorage.getItem("agent_name") || `Agent_${Math.floor(Math.random() * 1000)}`;
+        localStorage.setItem("agent_name", agentUser);
+
+        async function startConnection() {
+            connection = new signalR.HubConnectionBuilder()
+                .withUrl("https://localhost:7186/chat-hub?role=agent")
+                .configureLogging(signalR.LogLevel.Warning)
+                .build();
+
+            connection.on("ReceiveMessage", (fromUser, senderRole, message) => {
+                if (message.includes("[System] Chat started")) return;
+                appendMessage(senderRole, message);
+            });
+
+            connection.on("NewSessionStarted", (newSessionId) => {
+                const list = document.getElementById("session-list");
+                if ([...list.querySelectorAll("button")].some(btn => btn.textContent.includes(newSessionId))) return;
+                const li = document.createElement("li");
+                const btn = document.createElement("button");
+                btn.textContent = newSessionId;
+                btn.className = "text-blue-600 hover:underline";
+                btn.onclick = () => joinSession(newSessionId);
+                li.appendChild(btn);
+                list.appendChild(li);
+            });
+
+            await connection.start();
+
+            const stored = localStorage.getItem("agent_session_id");
+            if (stored) joinSession(stored);
+        }
+
+        document.getElementById("join-session").addEventListener("click", () => {
+            const id = document.getElementById("session-id").value.trim();
+            if (!id) return alert("Session ID required.");
+            joinSession(id);
+        });
+
+        document.getElementById("send-btn").addEventListener("click", async () => {
+            const msg = document.getElementById("message-input").value.trim();
+            if (!msg || !sessionId) return;
+            await connection.invoke("SendMessage", sessionId, agentUser, "agent", msg);
+            document.getElementById("message-input").value = "";
+        });
+
+        async function joinSession(id) {
+            sessionId = id;
+            localStorage.setItem("agent_session_id", sessionId);
+
+            if (connection.state !== signalR.HubConnectionState.Connected) {
+                await connection.start();
+            }
+
+            const res = await fetch("https://localhost:7186/api/assign-agent", {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ sessionId, agentName: agentUser })
+            });
+
+            const result = await res.text();
+            const cleaned = result.trim().toLowerCase();
+            if (cleaned.includes("already handled")) {
+                const assignedAgent = result.split("by")[1]?.trim().replace(/['"]+/g, "");
+                if (assignedAgent !== agentUser) {
+                    alert(result);
+                    return;
+                }
+            }
+
+            await connection.invoke("JoinSession", sessionId);
+
+            const historyRes = await fetch(`https://localhost:7186/api/chat/${sessionId}`);
+            const history = await historyRes.json();
+            document.getElementById("messages").innerHTML = "";
+
+            history.forEach(msg => {
+                if (msg.message.includes("[System] Chat started")) return;
+                appendMessage(msg.senderRole, msg.message);
+            });
+
+            const rejoined = localStorage.getItem("agent_session_id") === sessionId;
+            const msg = document.createElement("div");
+            msg.className = "text-center text-sm text-gray-500 mt-2";
+            // msg.textContent = `✅ ${rejoined ? "Reconnected" : "Joined"} session ${sessionId}`;
+            document.getElementById("messages").appendChild(msg);
+        }
+
+        async function loadSessions() {
+            const res = await fetch("https://localhost:7186/api/sessions");
+            const sessions = await res.json();
+            const list = document.getElementById("session-list");
+            list.innerHTML = "";
+            sessions.forEach(({ sessionId: id, assignedAgent }) => {
+                if (assignedAgent && assignedAgent !== agentUser) return;
+                const li = document.createElement("li");
+                const btn = document.createElement("button");
+                btn.textContent = id + (assignedAgent === agentUser ? " (yours)" : "");
+                btn.className = "text-blue-600 hover:underline";
+                btn.onclick = () => joinSession(id);
+                li.appendChild(btn);
+                list.appendChild(li);
+            });
+        }
+
+        function appendMessage(role, message) {
+            const isAgent = role === "agent";
+            const container = document.createElement("div");
+            container.className = `flex ${isAgent ? "justify-end" : "justify-start"}`;
+
+            container.innerHTML = `
+        <div class="relative max-w-xs px-4 py-2 rounded-lg ${isAgent ? "bg-blue-600 text-white rounded-br-none" : "bg-gray-200 text-black rounded-bl-none"}">
+          ${message}
+          <span class="absolute -bottom-1 ${isAgent ? "right-0" : "left-0"} w-0 h-0 
+            ${isAgent
+                    ? "border-t-[10px] border-l-[10px] border-t-blue-600 border-l-transparent"
+                    : "border-t-[10px] border-r-[10px] border-t-gray-200 border-r-transparent"}">
+          </span>
+        </div>`;
+            const msgBox = document.getElementById("messages");
+            msgBox.appendChild(container);
+            msgBox.scrollTop = msgBox.scrollHeight;
+        }
+
+        startConnection().catch(console.error);
+        loadSessions().catch(console.error);
+    </script>
+
+</body>
+
+</html>

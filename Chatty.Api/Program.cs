@@ -1,6 +1,7 @@
 using Chatty.Api.Data;
 using Chatty.Api.Hubs;
 using Chatty.Api.Services;
+using FastEndpoints;
 using Microsoft.EntityFrameworkCore;
 
 var builder = WebApplication.CreateBuilder(args);
@@ -10,6 +11,7 @@ builder.Services.AddCors(policy => policy.AddDefaultPolicy(policy=> policy.WithO
 builder.Services.AddDbContext<ChatDbContext>(options =>
     options.UseSqlServer(builder.Configuration.GetConnectionString("DefaultConnection")));
 
+builder.Services.AddFastEndpoints();
 builder.Services.AddSignalR();
 builder.Services.AddOpenApi();
 
@@ -18,7 +20,8 @@ builder.Services.AddHostedService<ChatSaveWorker>();
 
 var app = builder.Build();
 
-// Configure the HTTP request pipeline.
+app.UseFastEndpoints();
+
 if (app.Environment.IsDevelopment())
 {
     app.MapOpenApi();

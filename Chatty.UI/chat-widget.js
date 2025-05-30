@@ -12,7 +12,7 @@ class ChattyWidget extends HTMLElement {
                     width: 50px;
                     height: 50px;
                     border-radius: 50%;
-                    background: #007bff;
+                    background: #0084FF;
                     color: white;
                     font-size: 24px;
                     display: flex;
@@ -20,56 +20,86 @@ class ChattyWidget extends HTMLElement {
                     justify-content: center;
                     cursor: pointer;
                     z-index: 10000;
-                    box-shadow: 0 0 10px rgba(0,0,0,0.3);
+                    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.25);
                 }
+
                 #widget {
                     position: fixed;
                     bottom: 80px;
                     right: 20px;
-                    width: 300px;
-                    max-height: 400px;
+                    width: 320px;
+                    height: 450px;
                     background: white;
-                    border: 1px solid #ccc;
-                    border-radius: 10px;
-                    box-shadow: 0 0 10px rgba(0,0,0,0.2);
+                    border-radius: 12px;
+                    box-shadow: 0 4px 20px rgba(0, 0, 0, 0.25);
                     display: none;
                     flex-direction: column;
                     overflow: hidden;
-                    font-family: sans-serif;
+                    font-family: 'Segoe UI', sans-serif;
                     z-index: 9999;
                 }
+
                 #header {
-                    background: #007bff;
+                    background: #0084FF;
                     color: white;
-                    padding: 10px;
+                    padding: 12px;
                     font-weight: bold;
                     display: flex;
                     justify-content: space-between;
                     align-items: center;
+                    font-size: 16px;
                 }
+
                 #close-btn {
                     background: none;
                     border: none;
                     color: white;
-                    font-size: 18px;
+                    font-size: 20px;
                     cursor: pointer;
                 }
+
                 #messages {
                     flex: 1;
                     padding: 10px;
                     overflow-y: auto;
                     font-size: 14px;
+                    display: flex;
+                    flex-direction: column;
+                    gap: 6px;
                 }
+
                 #input {
                     border: none;
-                    border-top: 1px solid #ccc;
+                    border-top: 1px solid #ddd;
                     padding: 10px;
+                    font-size: 14px;
                     outline: none;
+                }
+
+                .message {
+                    max-width: 75%;
+                    padding: 8px 12px;
+                    border-radius: 18px;
+                    line-height: 1.4;
+                    word-wrap: break-word;
+                }
+
+                .customer {
+                    align-self: flex-start;
+                    background: #E4E6EB;
+                    color: black;
+                    border-bottom-left-radius: 0;
+                }
+
+                .agent {
+                    align-self: flex-end;
+                    background: #0084FF;
+                    color: white;
+                    border-bottom-right-radius: 0;
                 }
             </style>
 
             <div id="launcher">💬</div>
-
             <div id="widget">
                 <div id="header">
                     <span>Live Chat</span>
@@ -78,6 +108,9 @@ class ChattyWidget extends HTMLElement {
                 <div id="messages"></div>
                 <input id="honeypot" type="text" style="display:none;" autocomplete="off" />
                 <input id="input" type="text" placeholder="Type a message..." />
+                 <div style="text-align: center; font-size: 11px; color: #aaa; padding: 8px;">
+                 Chatty — by <span style="font-weight: bold; color: #0084FF;">JKC</span>
+                 </div>
             </div>
         `;
 
@@ -86,64 +119,105 @@ class ChattyWidget extends HTMLElement {
 
     initChat() {
         const user = "User" + Math.floor(Math.random() * 1000);
+        const sessionId = this.getOrCreateSessionId();
         const shadow = this.shadowRoot;
+
         const launcher = shadow.getElementById("launcher");
         const widget = shadow.getElementById("widget");
         const closeBtn = shadow.getElementById("close-btn");
         const messagesDiv = shadow.getElementById("messages");
         const input = shadow.getElementById("input");
 
-        // 👇 Hide launcher by default until connection succeeds
-        launcher.style.display = "none";
-
         const script = document.createElement("script");
         script.src = "https://cdnjs.cloudflare.com/ajax/libs/microsoft-signalr/7.0.5/signalr.min.js";
+
         script.onload = () => {
             const connection = new signalR.HubConnectionBuilder()
                 .withUrl("https://localhost:7186/chat-hub")
                 .configureLogging(signalR.LogLevel.Warning)
                 .build();
 
-            connection.on("ReceiveMessage", (user, message) => {
-                const msg = document.createElement("div");
-                msg.textContent = `${user}: ${message}`;
-                messagesDiv.appendChild(msg);
+            connection.on("ReceiveMessage", (fromUser, senderRole, message) => {
+                if (senderRole === "customer" && message.startsWith("[System]")) return;
+                this.appendMessage(messagesDiv, senderRole, message);
             });
 
-            connection.start().then(() => {
-                // ✅ Show launcher only after successful SignalR connection
+            connection.start().then(async () => {
                 launcher.style.display = "flex";
+                await connection.invoke("JoinSession", sessionId);
             }).catch(err => {
                 console.error("SignalR connection failed", err);
-                // ❌ Keep launcher hidden
             });
 
             input.addEventListener("keypress", async e => {
                 if (e.key === "Enter" && input.value.trim()) {
                     const honeypot = shadow.getElementById("honeypot");
-                    if (honeypot.value) {
-                        console.warn("Bot detected via honeypot. Ignoring message.");
-                        return;
-                    }
+                    if (honeypot && honeypot.value) return;
 
                     const msg = input.value.trim();
-                    await connection.invoke("SendMessage", user, msg);
+                    await connection.invoke("SendMessage", sessionId, user, "customer", msg);
                     input.value = "";
                 }
             });
-        };
-        document.head.appendChild(script);
 
-        launcher.onclick = () => widget.style.display = "flex";
-        closeBtn.onclick = () => widget.style.display = "none";
+            launcher.onclick = async () => {
+                widget.style.display = "flex";
+                launcher.style.display = "none";
+                await connection.invoke("JoinSession", sessionId);
+
+                try {
+                    const res = await fetch(`https://localhost:7186/api/chat/${sessionId}`);
+                    const history = await res.json();
+                    messagesDiv.innerHTML = "";
+
+                    history.forEach(msg => {
+                        if (msg.message.includes("[System] Chat started")) return;
+                        this.appendMessage(messagesDiv, msg.senderRole, msg.message);
+                    });
+                } catch (err) {
+                    console.error("Failed to load history:", err);
+                }
+
+                if (this._isNewSession) {
+                    await connection.invoke("NotifyAgentNewSession", sessionId);
+                    await connection.invoke("SendMessage", sessionId, user, "customer", "[System] Chat started");
+                    this._isNewSession = false;
+                }
+            };
+
+            closeBtn.onclick = () => {
+                widget.style.display = "none";
+                launcher.style.display = "flex";
+            };
+        };
+
+        document.head.appendChild(script);
     }
 
+    appendMessage(container, role, message) {
+        const msg = document.createElement("div");
+        msg.className = `message ${role === "agent" ? "agent" : "customer"}`;
+        msg.textContent = message;
+        container.appendChild(msg);
+        container.scrollTop = container.scrollHeight;
+    }
+
+    getOrCreateSessionId() {
+        let sessionId = localStorage.getItem("chat-session-id");
+        const isNew = !sessionId;
+
+        if (isNew) {
+            sessionId = crypto.randomUUID();
+            localStorage.setItem("chat-session-id", sessionId);
+        }
+
+        this._isNewSession = isNew;
+        return sessionId;
+    }
 }
 
-// Register the custom element
 customElements.define("chatty-widget", ChattyWidget);
 
-// 🔽 Auto-inject into DOM on load
 window.addEventListener("DOMContentLoaded", () => {
     if (!document.querySelector("chatty-widget")) {
         const widget = document.createElement("chatty-widget");
