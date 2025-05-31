@@ -17,6 +17,8 @@ public class GetSessionsEndpoint : EndpointWithoutRequest<List<SessionInfo>>
     {
         public string SessionId { get; set; } = default!;
         public string? AssignedAgent { get; set; }
+        public string? IpAddress { get; set; }
+        public string Label { get; set; } = default!;
     }
 
     public override void Configure()
@@ -27,19 +29,26 @@ public class GetSessionsEndpoint : EndpointWithoutRequest<List<SessionInfo>>
 
     public override async Task HandleAsync(CancellationToken ct)
     {
-        var sessions = await _db.ChatMessages
-            .OrderByDescending(m => m.SentAt)
-            .Select(m => m.SessionId)
-            .Distinct()
+        // Get latest message per session, ordered by SentAt
+        var latestMessages = await _db.ChatMessages
+            .GroupBy(m => m.SessionId)
+            .Select(g => g.OrderByDescending(m => m.SentAt).FirstOrDefault())
             .ToListAsync(ct);
 
-        var assigned = await _db.AgentSessions.ToDictionaryAsync(x => x.SessionId, x => x.AgentName, ct);
+        // Load assigned agents
+        var assigned = await _db.AgentSessions
+            .ToDictionaryAsync(x => x.SessionId, x => x.AgentName, ct);
 
-        var result = sessions.Select(sid => new SessionInfo
-        {
-            SessionId = sid,
-            AssignedAgent = assigned.ContainsKey(sid) ? assigned[sid] : null
-        }).ToList();
+        var result = latestMessages
+            .OrderByDescending(m => m.SentAt)
+            .Select((msg, index) => new SessionInfo
+            {
+                SessionId = msg!.SessionId,
+                AssignedAgent = assigned.ContainsKey(msg.SessionId) ? assigned[msg.SessionId] : null,
+                IpAddress = msg.IpAddress,
+                Label = $"User {index + 1}"
+            })
+            .ToList();
 
         await SendAsync(result);
     }

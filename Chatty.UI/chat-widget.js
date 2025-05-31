@@ -191,7 +191,6 @@ class ChattyWidget extends HTMLElement {
                 }
 
                 if (this._isNewSession) {
-                    await connection.invoke("NotifyAgentNewSession", sessionId);
                     await connection.invoke("SendMessage", sessionId, user, "customer", "[System] Chat started");
                     this._isNewSession = false;
                 }

@@ -55,25 +55,37 @@
             connection.on("ReceiveMessage", (fromUser, senderRole, message) => {
                 if (message.includes("[System] Chat started")) return;
                 const typingId = "typing-" + sessionId;
+                console.log(typingId);
                 const typingDiv = document.getElementById(typingId);
                 if (typingDiv) typingDiv.remove();
-                appendMessage(senderRole, message);
+                appendMessage(senderRole, message, new Date().toISOString(), false);
             });
 
-            connection.on("NewSessionStarted", (newSessionId) => {
+            connection.on("NewSessionStarted", (sessionId, label, ipAddress) => {
                 const list = document.getElementById("session-list");
-                if ([...list.querySelectorAll("button")].some(btn => btn.textContent.includes(newSessionId))) return;
+                if ([...list.querySelectorAll("button")].some(btn => btn.textContent.includes(label))) return;
+
                 const li = document.createElement("li");
                 const btn = document.createElement("button");
-                btn.textContent = newSessionId;
+                btn.textContent = label;
                 btn.className = "text-blue-600 hover:underline";
-                btn.onclick = () => joinSession(newSessionId);
+                btn.onclick = () => joinSession(sessionId);
+
+                const ip = document.createElement("span");
+                ip.textContent = ` – ${ipAddress ?? "unknown"}`;
+                ip.className = "text-xs text-gray-500 ml-2";
+
                 li.appendChild(btn);
+                li.appendChild(ip);
                 list.appendChild(li);
             });
 
-            connection.on("ReceiveTypingText", (sessionId, user, text) => {
-                const typingId = "typing-" + sessionId;
+
+            connection.on("ReceiveTypingText", (incomingSessionId, user, text) => {
+                const activeSessionId = localStorage.getItem("agent_session_id");
+                if (incomingSessionId !== activeSessionId) return; // ignore if not viewing
+
+                const typingId = "typing-" + incomingSessionId;
                 const messagesContainer = document.getElementById("messages");
 
                 if (!text || !text.trim()) {
@@ -83,7 +95,6 @@
                 }
 
                 let existing = document.getElementById(typingId);
-
                 if (!existing) {
                     existing = document.createElement("div");
                     existing.id = typingId;
@@ -91,9 +102,7 @@
                 }
 
                 existing.textContent = `${user} is typing: "${text}"`;
-
                 messagesContainer.appendChild(existing);
-
                 messagesContainer.scrollTop = messagesContainer.scrollHeight;
             });
 
@@ -147,8 +156,9 @@
             document.getElementById("messages").innerHTML = "";
 
             history.forEach(msg => {
+                console.log(msg);
                 if (msg.message.includes("[System] Chat started")) return;
-                appendMessage(msg.senderRole, msg.message);
+                appendMessage(msg.senderRole, msg.message, msg.sentAt);
             });
 
             const rejoined = localStorage.getItem("agent_session_id") === sessionId;
@@ -163,35 +173,61 @@
             const sessions = await res.json();
             const list = document.getElementById("session-list");
             list.innerHTML = "";
-            sessions.forEach(({ sessionId: id, assignedAgent }) => {
+
+            sessions.forEach(({ sessionId, assignedAgent, label, ipAddress }) => {
                 if (assignedAgent && assignedAgent !== agentUser) return;
+
                 const li = document.createElement("li");
                 const btn = document.createElement("button");
-                btn.textContent = id + (assignedAgent === agentUser ? " (yours)" : "");
+
+                btn.textContent = `${label}${assignedAgent === agentUser ? " (yours)" : ""}`;
                 btn.className = "text-blue-600 hover:underline";
-                btn.onclick = () => joinSession(id);
+                btn.onclick = () => joinSession(sessionId);
+
+                const ip = document.createElement("span");
+                ip.textContent = ` – ${ipAddress ?? "unknown"}`;
+                ip.className = "text-xs text-gray-500 ml-2";
+
                 li.appendChild(btn);
+                li.appendChild(ip);
                 list.appendChild(li);
             });
         }
 
-        function appendMessage(role, message) {
+        function appendMessage(role, message, timestamp, isUtc = true) {
             const isAgent = role === "agent";
             const container = document.createElement("div");
             container.className = `flex ${isAgent ? "justify-end" : "justify-start"}`;
 
+            const formattedTime = formatTimestamp(timestamp || new Date().toISOString(), isUtc);
+
             container.innerHTML = `
-        <div class="relative max-w-xs px-4 py-2 rounded-lg ${isAgent ? "bg-blue-600 text-white rounded-br-none" : "bg-gray-200 text-black rounded-bl-none"}">
-          ${message}
-          <span class="absolute -bottom-1 ${isAgent ? "right-0" : "left-0"} w-0 h-0 
+    <div class="relative max-w-xs px-4 py-2 rounded-lg ${isAgent ? "bg-blue-600 text-white rounded-br-none" : "bg-gray-200 text-black rounded-bl-none"}" title="${formattedTime}">
+        ${message}
+        <span class="absolute -bottom-1 ${isAgent ? "right-0" : "left-0"} w-0 h-0 
             ${isAgent
                     ? "border-t-[10px] border-l-[10px] border-t-blue-600 border-l-transparent"
                     : "border-t-[10px] border-r-[10px] border-t-gray-200 border-r-transparent"}">
-          </span>
-        </div>`;
+        </span>
+    </div>`;
+
             const msgBox = document.getElementById("messages");
             msgBox.appendChild(container);
             msgBox.scrollTop = msgBox.scrollHeight;
+        }
+
+        function formatTimestamp(isoString, isUtc = true) {
+            const baseDate = new Date(isoString);
+            const localDate = isUtc
+                ? new Date(baseDate.getTime() + (baseDate.getTimezoneOffset() * -60000))
+                : baseDate;
+
+            const now = new Date();
+            const isToday = localDate.toDateString() === now.toDateString();
+
+            return isToday
+                ? localDate.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
+                : localDate.toLocaleString([], { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' });
         }
 
         startConnection().catch(console.error);

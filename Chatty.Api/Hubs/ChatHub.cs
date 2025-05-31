@@ -2,12 +2,14 @@
 using Chatty.Api.Services;
 using Microsoft.AspNetCore.SignalR;
 using System.Data;
+using System.Net;
 
 namespace Chatty.Api.Hubs;
 
 public class ChatHub : Hub
 {
-    private readonly IChatMessageQueue _queue;
+    private readonly IChatMessageQueue _queue; 
+    private static readonly List<string> SessionOrder = new();
 
     public ChatHub(IChatMessageQueue queue)
     {
@@ -44,10 +46,9 @@ public class ChatHub : Hub
         await Clients.GroupExcept(sessionId, Context.ConnectionId).SendAsync("ReceiveTypingText", sessionId, user, text);
     }
 
-    public async Task NotifyAgentNewSession(string sessionId)
+    public async Task NotifyAgentNewSession(string sessionId, string label, string ipAddress)
     {
-        // Notify agents immediately
-        await Clients.Group("agents").SendAsync("NewSessionStarted", sessionId);
+        await Clients.Group("agents").SendAsync("NewSessionStarted", sessionId, label, ipAddress);
     }
 
     public async Task JoinSession(string sessionId)
@@ -60,13 +61,19 @@ public class ChatHub : Hub
         if (string.IsNullOrWhiteSpace(sessionId) || string.IsNullOrWhiteSpace(message))
             return;
 
+        var ip = Context.GetHttpContext()?.Connection.RemoteIpAddress?.ToString();
+
+        if (ip == "::1")
+            ip = Context.GetHttpContext()?.Request.Headers["X-Forwarded-For"].FirstOrDefault() ?? "127.0.0.1"; //testing
+
         var chatMessage = new ChatMessage
         {
             SessionId = sessionId,
             User = user,
             SenderRole = senderRole,
             Message = message,
-            SentAt = DateTime.UtcNow
+            SentAt = DateTime.UtcNow,
+            IpAddress = ip
         };
 
         _queue.Enqueue(chatMessage);
@@ -76,7 +83,16 @@ public class ChatHub : Hub
 
         if (senderRole == "customer" && message.Contains("[System] Chat started"))
         {
-            await Clients.Group("agents").SendAsync("NewSessionStarted", sessionId);
+            var label = GenerateSessionLabel(sessionId);
+            await NotifyAgentNewSession(sessionId, label, ip!);
         }
+    }
+
+    private string GenerateSessionLabel(string sessionId)
+    {
+        if (!SessionOrder.Contains(sessionId))
+            SessionOrder.Add(sessionId);
+
+        return $"User {SessionOrder.IndexOf(sessionId) + 1}";
     }
 }

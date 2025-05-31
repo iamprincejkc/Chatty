@@ -8,4 +8,5 @@ public class ChatMessage
     public string User { get; set; } = default!;
     public string Message { get; set; } = default!;
     public DateTime SentAt { get; set; } = DateTime.UtcNow;
+    public string? IpAddress { get; set; }
 }
