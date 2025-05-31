@@ -160,6 +160,16 @@ class ChattyWidget extends HTMLElement {
                 }
             });
 
+            input.addEventListener("input", () => {
+                const honeypot = shadow.getElementById("honeypot");
+                if (honeypot && honeypot.value) return; // bot detected
+
+                const text = input.value;
+                if (connection && connection.state === signalR.HubConnectionState.Connected) {
+                    connection.invoke("SendTypingText", sessionId, user, text);
+                }
+            });
+
             launcher.onclick = async () => {
                 widget.style.display = "flex";
                 launcher.style.display = "none";
@@ -174,6 +184,8 @@ class ChattyWidget extends HTMLElement {
                         if (msg.message.includes("[System] Chat started")) return;
                         this.appendMessage(messagesDiv, msg.senderRole, msg.message);
                     });
+
+                    messagesDiv.scrollTop = messagesDiv.scrollHeight;
                 } catch (err) {
                     console.error("Failed to load history:", err);
                 }

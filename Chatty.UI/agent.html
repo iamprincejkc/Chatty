@@ -54,6 +54,9 @@
 
             connection.on("ReceiveMessage", (fromUser, senderRole, message) => {
                 if (message.includes("[System] Chat started")) return;
+                const typingId = "typing-" + sessionId;
+                const typingDiv = document.getElementById(typingId);
+                if (typingDiv) typingDiv.remove();
                 appendMessage(senderRole, message);
             });
 
@@ -67,6 +70,31 @@
                 btn.onclick = () => joinSession(newSessionId);
                 li.appendChild(btn);
                 list.appendChild(li);
+            });
+
+            connection.on("ReceiveTypingText", (sessionId, user, text) => {
+                const typingId = "typing-" + sessionId;
+                const messagesContainer = document.getElementById("messages");
+
+                if (!text || !text.trim()) {
+                    const existing = document.getElementById(typingId);
+                    if (existing) existing.remove();
+                    return;
+                }
+
+                let existing = document.getElementById(typingId);
+
+                if (!existing) {
+                    existing = document.createElement("div");
+                    existing.id = typingId;
+                    existing.className = "text-sm text-gray-500 italic mt-1 px-2";
+                }
+
+                existing.textContent = `${user} is typing: "${text}"`;
+
+                messagesContainer.appendChild(existing);
+
+                messagesContainer.scrollTop = messagesContainer.scrollHeight;
             });
 
             await connection.start();

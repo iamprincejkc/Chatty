@@ -38,6 +38,12 @@ public class ChatHub : Hub
 
         await base.OnDisconnectedAsync(exception);
     }
+
+    public async Task SendTypingText(string sessionId, string user, string text)
+    {
+        await Clients.GroupExcept(sessionId, Context.ConnectionId).SendAsync("ReceiveTypingText", sessionId, user, text);
+    }
+
     public async Task NotifyAgentNewSession(string sessionId)
     {
         // Notify agents immediately
