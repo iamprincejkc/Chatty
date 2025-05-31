@@ -1,7 +1,9 @@
+using Chatty.Api.Contracts;
 using Chatty.Api.Data;
 using Chatty.Api.Hubs;
 using Chatty.Api.Services;
 using FastEndpoints;
+using Microsoft.AspNetCore.HttpOverrides;
 using Microsoft.EntityFrameworkCore;
 
 var builder = WebApplication.CreateBuilder(args);
@@ -15,8 +17,10 @@ builder.Services.AddFastEndpoints();
 builder.Services.AddSignalR();
 builder.Services.AddOpenApi();
 
+builder.Services.AddSingleton<IAgentSessionTracker, AgentSessionTracker>();
 builder.Services.AddSingleton<IChatMessageQueue, ChatMessageQueue>();
 builder.Services.AddHostedService<ChatSaveWorker>();
+builder.Services.AddHostedService<AgentCleanupService>();
 
 var app = builder.Build();
 
@@ -30,6 +34,11 @@ app.UseCors();
 app.MapHub<ChatHub>("/chat-hub");
 
 app.UseHttpsRedirection();
+
+app.UseForwardedHeaders(new ForwardedHeadersOptions
+{
+    ForwardedHeaders = ForwardedHeaders.XForwardedFor | ForwardedHeaders.XForwardedProto
+});
 
 using (var scope = app.Services.CreateScope())
 {

@@ -191,9 +191,13 @@ class ChattyWidget extends HTMLElement {
                 }
 
                 if (this._isNewSession) {
-                    await connection.invoke("SendMessage", sessionId, user, "customer", "[System] Chat started");
+
+                    const label = "New User";
+                    const ipAddress = await fetch("https://api.ipify.org").then(res => res.text()).catch(() => "unknown");
+                    await connection.invoke("NotifyAgentNewSession", sessionId, label, ipAddress);
                     this._isNewSession = false;
                 }
+                await connection.invoke("SendMessage", sessionId, user, "customer", "[System] Chat started");
             };
 
             closeBtn.onclick = () => {
@@ -234,4 +238,9 @@ window.addEventListener("DOMContentLoaded", () => {
         const widget = document.createElement("chatty-widget");
         document.body.appendChild(widget);
     }
+});
+
+window.addEventListener("beforeunload", () => {
+    localStorage.removeItem("chatty_session_id");
+    localStorage.removeItem("chatty_user");
 });

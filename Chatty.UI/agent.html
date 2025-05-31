@@ -52,20 +52,27 @@
                 .configureLogging(signalR.LogLevel.Warning)
                 .build();
 
-            connection.on("ReceiveMessage", (fromUser, senderRole, message) => {
+            connection.on("ReceiveMessage", (fromUser, senderRole, message, incomingSessionId) => {
+                const activeSessionId = localStorage.getItem("agent_session_id");
+
+                if (incomingSessionId !== activeSessionId) return;
                 if (message.includes("[System] Chat started")) return;
-                const typingId = "typing-" + sessionId;
-                console.log(typingId);
+
+                const typingId = "typing-" + incomingSessionId;
                 const typingDiv = document.getElementById(typingId);
-                if (typingDiv) typingDiv.remove();
+                if (typingDiv) typingDiv.textContent = "";
+
                 appendMessage(senderRole, message, new Date().toISOString(), false);
             });
 
             connection.on("NewSessionStarted", (sessionId, label, ipAddress) => {
                 const list = document.getElementById("session-list");
-                if ([...list.querySelectorAll("button")].some(btn => btn.textContent.includes(label))) return;
+                const existing = list.querySelector(`[data-session-id="${sessionId}"]`);
+                if (existing) return;
 
                 const li = document.createElement("li");
+                li.dataset.sessionId = sessionId;
+
                 const btn = document.createElement("button");
                 btn.textContent = label;
                 btn.className = "text-blue-600 hover:underline";
@@ -75,41 +82,44 @@
                 ip.textContent = ` – ${ipAddress ?? "unknown"}`;
                 ip.className = "text-xs text-gray-500 ml-2";
 
+                const typing = document.createElement("div");
+                typing.id = `typing-${sessionId}`;
+                typing.className = "text-xs text-gray-400 ml-2";
+                typing.style.fontStyle = "italic";
+
                 li.appendChild(btn);
                 li.appendChild(ip);
+                li.appendChild(typing);
                 list.appendChild(li);
             });
 
 
             connection.on("ReceiveTypingText", (incomingSessionId, user, text) => {
-                const activeSessionId = localStorage.getItem("agent_session_id");
-                if (incomingSessionId !== activeSessionId) return; // ignore if not viewing
+                console.log(incomingSessionId);
+                const typingId = `typing-${incomingSessionId}`;
+                let typingDiv = document.getElementById(typingId);
 
-                const typingId = "typing-" + incomingSessionId;
-                const messagesContainer = document.getElementById("messages");
+                if (!typingDiv) {
+                    const li = document.querySelector(`[data-session-id="${incomingSessionId}"]`);
+                    if (!li) return;
 
-                if (!text || !text.trim()) {
-                    const existing = document.getElementById(typingId);
-                    if (existing) existing.remove();
-                    return;
+                    typingDiv = document.createElement("div");
+                    typingDiv.id = typingId;
+                    typingDiv.className = "text-xs text-gray-400 ml-2";
+                    typingDiv.style.fontStyle = "italic";
+                    li.appendChild(typingDiv);
                 }
 
-                let existing = document.getElementById(typingId);
-                if (!existing) {
-                    existing = document.createElement("div");
-                    existing.id = typingId;
-                    existing.className = "text-sm text-gray-500 italic mt-1 px-2";
-                }
-
-                existing.textContent = `${user} is typing: "${text}"`;
-                messagesContainer.appendChild(existing);
-                messagesContainer.scrollTop = messagesContainer.scrollHeight;
+                typingDiv.textContent = text && text.trim()
+                    ? `${user} is typing: "${text}"`
+                    : "";
             });
-
             await connection.start();
 
             const stored = localStorage.getItem("agent_session_id");
-            if (stored) joinSession(stored);
+            if (stored) {
+                await joinSession(stored);
+            }
         }
 
         document.getElementById("join-session").addEventListener("click", () => {
@@ -129,6 +139,23 @@
             sessionId = id;
             localStorage.setItem("agent_session_id", sessionId);
 
+            // Clear previous highlights
+            document.querySelectorAll("#session-list li").forEach(li => {
+                li.classList.remove("bg-blue-50", "font-semibold");
+                const btn = li.querySelector("button");
+                if (btn) btn.textContent = btn.textContent.replace(" (viewing)", "");
+            });
+
+            // Highlight current session
+            const activeLi = document.querySelector(`#session-list [data-session-id="${id}"]`);
+            if (activeLi) {
+                activeLi.classList.add("bg-blue-50", "font-semibold");
+                const btn = activeLi.querySelector("button");
+                if (btn && !btn.textContent.includes("(viewing)")) {
+                    btn.textContent += " (viewing)";
+                }
+            }
+
             if (connection.state !== signalR.HubConnectionState.Connected) {
                 await connection.start();
             }
@@ -136,7 +163,7 @@
             const res = await fetch("https://localhost:7186/api/assign-agent", {
                 method: "POST",
                 headers: { "Content-Type": "application/json" },
-                body: JSON.stringify({ sessionId, agentName: agentUser })
+                body: JSON.stringify({ sessionId, agentName: agentUser, agentConnectionId: connection.connectionId })
             });
 
             const result = await res.text();
@@ -156,15 +183,12 @@
             document.getElementById("messages").innerHTML = "";
 
             history.forEach(msg => {
-                console.log(msg);
                 if (msg.message.includes("[System] Chat started")) return;
                 appendMessage(msg.senderRole, msg.message, msg.sentAt);
             });
 
-            const rejoined = localStorage.getItem("agent_session_id") === sessionId;
             const msg = document.createElement("div");
             msg.className = "text-center text-sm text-gray-500 mt-2";
-            // msg.textContent = `✅ ${rejoined ? "Reconnected" : "Joined"} session ${sessionId}`;
             document.getElementById("messages").appendChild(msg);
         }
 
@@ -174,22 +198,33 @@
             const list = document.getElementById("session-list");
             list.innerHTML = "";
 
+            const currentSession = localStorage.getItem("agent_session_id");
+
             sessions.forEach(({ sessionId, assignedAgent, label, ipAddress }) => {
                 if (assignedAgent && assignedAgent !== agentUser) return;
 
                 const li = document.createElement("li");
-                const btn = document.createElement("button");
+                li.dataset.sessionId = sessionId;
 
-                btn.textContent = `${label}${assignedAgent === agentUser ? " (yours)" : ""}`;
-                btn.className = "text-blue-600 hover:underline";
+                const btn = document.createElement("button");
+                const isViewing = sessionId === currentSession;
+
+                btn.textContent = `${label}${isViewing ? " (viewing)" : ""}`;
+                btn.className = `text-blue-600 hover:underline ${isViewing ? "font-bold" : ""}`;
                 btn.onclick = () => joinSession(sessionId);
 
                 const ip = document.createElement("span");
                 ip.textContent = ` – ${ipAddress ?? "unknown"}`;
                 ip.className = "text-xs text-gray-500 ml-2";
 
+                const typing = document.createElement("div");
+                typing.id = `typing-${sessionId}`;
+                typing.className = "text-xs text-gray-400 ml-2";
+                typing.style.fontStyle = "italic";
+
                 li.appendChild(btn);
                 li.appendChild(ip);
+                li.appendChild(typing);
                 list.appendChild(li);
             });
         }
@@ -230,8 +265,8 @@
                 : localDate.toLocaleString([], { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' });
         }
 
-        startConnection().catch(console.error);
         loadSessions().catch(console.error);
+        startConnection().catch(console.error);
     </script>
 
 </body>
