@@ -36,7 +36,7 @@ public class AssignAgentEndpoint : Endpoint<AssignAgentRequest, string>
         if (existing is not null)
         {
             // Check if that agent is still connected in memory
-            var isGhost = !_agentTracker.AgentSessions.ContainsKey(existing.SessionId);
+            var isGhost = !_agentTracker.AgentSessionsByUsername.Any(pair => pair.Value.Contains(existing.SessionId));
 
             if (!isGhost && existing.AgentName != req.AgentName)
             {

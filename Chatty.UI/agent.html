@@ -43,14 +43,28 @@
     <script>
         let connection;
         let sessionId = null;
-        let agentUser = localStorage.getItem("agent_name") || `Agent_${Math.floor(Math.random() * 1000)}`;
+        const agentUser = localStorage.getItem("agent_name");
+
+        if (!agentUser) {
+            window.location.href = "agent-login.html";
+        }
+
         localStorage.setItem("agent_name", agentUser);
 
         async function startConnection() {
             connection = new signalR.HubConnectionBuilder()
-                .withUrl("https://localhost:7186/chat-hub?role=agent")
+                .withUrl(`https://localhost:7186/chat-hub?role=agent&username=${encodeURIComponent(agentUser)}`)
                 .configureLogging(signalR.LogLevel.Warning)
                 .build();
+
+            connection.on("PingCheck", () => {
+                connection.invoke("PingCheck"); // This will call ChatHub.PingCheck()
+            });
+
+            connection.on("SessionEnded", sessionId => {
+                const sessionEl = document.querySelector(`[data-session-id="${sessionId}"]`);
+                if (sessionEl) sessionEl.remove();
+            });
 
             connection.on("ReceiveMessage", (fromUser, senderRole, message, incomingSessionId) => {
                 const activeSessionId = localStorage.getItem("agent_session_id");
@@ -70,27 +84,36 @@
                 const existing = list.querySelector(`[data-session-id="${sessionId}"]`);
                 if (existing) return;
 
-                const li = document.createElement("li");
-                li.dataset.sessionId = sessionId;
+                // Fetch updated assignment state
+                fetch(`https://localhost:7186/api/sessions/${sessionId}`)
+                    .then(res => res.json())
+                    .then(session => {
+                        if (session.assignedAgent && session.assignedAgent !== agentUser) {
+                            return; // Don't show it if handled by another agent
+                        }
 
-                const btn = document.createElement("button");
-                btn.textContent = label;
-                btn.className = "text-blue-600 hover:underline";
-                btn.onclick = () => joinSession(sessionId);
+                        const li = document.createElement("li");
+                        li.dataset.sessionId = sessionId;
 
-                const ip = document.createElement("span");
-                ip.textContent = ` – ${ipAddress ?? "unknown"}`;
-                ip.className = "text-xs text-gray-500 ml-2";
+                        const btn = document.createElement("button");
+                        btn.textContent = label;
+                        btn.className = "text-blue-600 hover:underline";
+                        btn.onclick = () => joinSession(sessionId);
 
-                const typing = document.createElement("div");
-                typing.id = `typing-${sessionId}`;
-                typing.className = "text-xs text-gray-400 ml-2";
-                typing.style.fontStyle = "italic";
+                        const ip = document.createElement("span");
+                        ip.textContent = ` – ${ipAddress ?? "unknown"}`;
+                        ip.className = "text-xs text-gray-500 ml-2";
 
-                li.appendChild(btn);
-                li.appendChild(ip);
-                li.appendChild(typing);
-                list.appendChild(li);
+                        const typing = document.createElement("div");
+                        typing.id = `typing-${sessionId}`;
+                        typing.className = "text-xs text-gray-400 ml-2";
+                        typing.style.fontStyle = "italic";
+
+                        li.appendChild(btn);
+                        li.appendChild(ip);
+                        li.appendChild(typing);
+                        list.appendChild(li);
+                    });
             });
 
 
@@ -119,6 +142,7 @@
             const stored = localStorage.getItem("agent_session_id");
             if (stored) {
                 await joinSession(stored);
+                document.getElementById("session-id").value = stored;
             }
         }
 
@@ -157,7 +181,10 @@
             }
 
             if (connection.state !== signalR.HubConnectionState.Connected) {
-                await connection.start();
+                await connection.start().catch(err => {
+                    console.error("Reconnection failed", err);
+                    return;
+                });
             }
 
             const res = await fetch("https://localhost:7186/api/assign-agent", {

@@ -40,13 +40,13 @@ public class GetSessionsEndpoint : EndpointWithoutRequest<List<SessionInfo>>
             .ToDictionaryAsync(x => x.SessionId, x => x.AgentName, ct);
 
         var result = latestMessages
-            .OrderByDescending(m => m.SentAt)
+            .OrderByDescending(m => m!.SentAt)
             .Select((msg, index) => new SessionInfo
             {
                 SessionId = msg!.SessionId,
                 AssignedAgent = assigned.ContainsKey(msg.SessionId) ? assigned[msg.SessionId] : null,
                 IpAddress = msg.IpAddress,
-                Label = $"User {index + 1}"
+                Label = msg.User
             })
             .ToList();
 

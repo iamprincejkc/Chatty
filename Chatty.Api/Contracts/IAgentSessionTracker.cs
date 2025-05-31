@@ -4,6 +4,7 @@ namespace Chatty.Api.Contracts;
 
 public interface IAgentSessionTracker
 {
-    public ConcurrentDictionary<string, HashSet<string>> AgentSessions { get;}
+    ConcurrentDictionary<string, HashSet<string>> AgentSessionsByUsername { get; }
+    ConcurrentDictionary<string, string> ConnectedAgentsByUsername { get; }
 
 }
