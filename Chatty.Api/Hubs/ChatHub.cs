@@ -27,18 +27,60 @@ public class ChatHub : Hub
 
     public override async Task OnConnectedAsync()
     {
-        var role = Context.GetHttpContext()?.Request.Query["role"].ToString();
-        var username = Context.GetHttpContext()?.Request.Query["username"].ToString();
+        var context = Context.GetHttpContext();
+        var role = context?.Request.Query["role"].ToString();
+        var username = context?.Request.Query["username"].ToString();
+        var sessionId = context?.Request.Query["sessionId"].ToString();
 
-        if (string.Equals(role, "agent", StringComparison.OrdinalIgnoreCase) && !string.IsNullOrWhiteSpace(username))
+        if (role == "agent" && !string.IsNullOrWhiteSpace(username))
         {
             await Groups.AddToGroupAsync(Context.ConnectionId, "agents");
             ConnectedAgentsByUsername[username] = Context.ConnectionId;
             Console.WriteLine($"Agent connected: {username} ({Context.ConnectionId})");
         }
 
+        // ✅ [NEW] Detect new customer session
+        if (role == "customer" && !string.IsNullOrWhiteSpace(sessionId))
+        {
+            // Track session IP
+            if (!SessionIpMap.ContainsKey(sessionId))
+            {
+                var ipRaw = context?.Connection.RemoteIpAddress?.ToString();
+                var forwarded = context?.Request.Headers["X-Forwarded-For"].FirstOrDefault();
+                var finalIp = !string.IsNullOrWhiteSpace(forwarded) ? forwarded : ipRaw;
+
+                if (!string.IsNullOrWhiteSpace(finalIp))
+                    SessionIpMap[sessionId] = finalIp!;
+            }
+
+            // If session is new
+            if (!SessionOrder.Contains(sessionId))
+            {
+                SessionOrder.Add(sessionId);
+
+                // Check if already assigned to agent (in-memory or DB)
+                bool isHandled = _agentTracker.AgentSessionsByUsername.Any(pair =>
+                    pair.Value.Contains(sessionId) && ConnectedAgentsByUsername.ContainsKey(pair.Key));
+
+                if (!isHandled)
+                {
+                    using var scope = _scopeFactory.CreateScope();
+                    var db = scope.ServiceProvider.GetRequiredService<ChatDbContext>();
+                    var dbAssigned = await db.AgentSessions.AnyAsync(x => x.SessionId == sessionId);
+
+                    if (!dbAssigned)
+                    {
+                        var label = GenerateSessionLabel(sessionId);
+                        var ip = SessionIpMap.GetValueOrDefault(sessionId, "unknown");
+                        await NotifyAgentNewSession(sessionId, label, ip);
+                    }
+                }
+            }
+        }
+
         await base.OnConnectedAsync();
     }
+
 
     public override async Task OnDisconnectedAsync(Exception? exception)
     {
@@ -189,27 +231,36 @@ public class ChatHub : Hub
 
         await Clients.Group(sessionId).SendAsync("ReceiveMessage", user, senderRole, message, sessionId);
 
+        // ✅ Detect new customer session and notify agent UI
         if (senderRole == "customer" && message.Contains("[System] Chat started"))
         {
-            // Check if any connected agent is assigned to this session
-            bool isHandled = _agentTracker.AgentSessionsByUsername.Any(pair =>
-                pair.Value.Contains(sessionId) && ConnectedAgentsByUsername.ContainsKey(pair.Key));
+            var isFirstTime = !SessionOrder.Contains(sessionId);
 
-            if (!isHandled)
+            if (isFirstTime)
             {
-                // Also check DB in case it's stale
-                using var scope = _scopeFactory.CreateScope();
-                var db = scope.ServiceProvider.GetRequiredService<ChatDbContext>();
-                var dbAssigned = await db.AgentSessions.AnyAsync(x => x.SessionId == sessionId);
+                SessionOrder.Add(sessionId); // mark as initialized
 
-                if (!dbAssigned)
+                // double-check if someone is already assigned (live or stale DB)
+                bool isHandled = _agentTracker.AgentSessionsByUsername.Any(pair =>
+                    pair.Value.Contains(sessionId) && ConnectedAgentsByUsername.ContainsKey(pair.Key));
+
+                if (!isHandled)
                 {
-                    var label = GenerateSessionLabel(sessionId);
-                    await NotifyAgentNewSession(sessionId, label, SessionIpMap.GetValueOrDefault(sessionId)!);
+                    using var scope = _scopeFactory.CreateScope();
+                    var db = scope.ServiceProvider.GetRequiredService<ChatDbContext>();
+                    var dbAssigned = await db.AgentSessions.AnyAsync(x => x.SessionId == sessionId);
+
+                    if (!dbAssigned)
+                    {
+                        var label = GenerateSessionLabel(sessionId);
+                        var ip = SessionIpMap.GetValueOrDefault(sessionId, "unknown");
+                        await NotifyAgentNewSession(sessionId, label, ip);
+                    }
                 }
             }
         }
     }
+
 
     private string GenerateSessionLabel(string sessionId)
     {
@@ -217,5 +268,13 @@ public class ChatHub : Hub
             SessionOrder.Add(sessionId);
 
         return $"New User {SessionOrder.IndexOf(sessionId) + 1}";
+    }
+
+    public static List<string> GetActiveCustomerSessions()
+    {
+        lock (CustomerConnections)
+        {
+            return CustomerConnections.Values.Distinct().ToList();
+        }
     }
 }

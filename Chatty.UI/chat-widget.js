@@ -207,7 +207,7 @@ class ChattyWidget extends HTMLElement {
 
         script.onload = () => {
             const connection = new signalR.HubConnectionBuilder()
-                .withUrl(`${apiBase}/chat-hub`)
+                .withUrl(`${apiBase}/chat-hub?role=customer&username=${user}&sessionId=${sessionId}`)
                 .configureLogging(signalR.LogLevel.Warning)
                 .build();
 
@@ -267,7 +267,7 @@ class ChattyWidget extends HTMLElement {
                 if (this._isNewSession && connection.state === signalR.HubConnectionState.Connected) {
                     const label = "New User";
                     const ipAddress = await fetch("https://api.ipify.org").then(r => r.text()).catch(() => "unknown");
-                    await connection.invoke("NotifyAgentNewSession", sessionId, label, ipAddress);
+                    // await connection.invoke("NotifyAgentNewSession", sessionId, label, ipAddress);
                     await connection.invoke("SendMessage", sessionId, user, "customer", "[System] Chat started");
                     this._isNewSession = false;
                 }

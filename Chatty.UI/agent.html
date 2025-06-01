@@ -53,7 +53,18 @@
                 .build();
 
             connection.on("PingCheck", () => connection.invoke("PingCheck"));
-            connection.on("SessionEnded", id => document.querySelector(`[data-session-id="${id}"]`)?.remove());
+
+            connection.on("SessionEnded", id => {
+                const li = document.querySelector(`[data-session-id="${id}"]`);
+                if (li) li.remove();
+
+                if (sessionId === id) {
+                    sessionId = null;
+                    localStorage.removeItem("agent_session_id");
+                    document.getElementById("messages").innerHTML = "";
+                    document.getElementById("typing-indicator").textContent = "";
+                }
+            });
 
             connection.on("ReceiveMessage", (from, role, msg, incomingId) => {
                 if (incomingId !== sessionId || msg.includes("[System]")) return;
@@ -68,7 +79,15 @@
             });
 
             connection.on("NewSessionStarted", (id, label, ip) => {
-                if (document.querySelector(`[data-session-id="${id}"]`)) return;
+                const li = document.querySelector(`[data-session-id="${id}"]`);
+                if (li) li.remove();
+
+                if (sessionId === id) {
+                    sessionId = null;
+                    localStorage.removeItem("agent_session_id");
+                    document.getElementById("messages").innerHTML = "";
+                    document.getElementById("typing-indicator").textContent = "";
+                }
 
                 fetch(`${API}/api/sessions/${id}`).then(r => r.json()).then(session => {
                     if (session.assignedAgent && session.assignedAgent !== agentUser) return;

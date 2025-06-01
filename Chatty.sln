@@ -1,14 +1,16 @@
 ﻿
 Microsoft Visual Studio Solution File, Format Version 12.00
 # Visual Studio Version 17
-VisualStudioVersion = 17.13.35931.197 d17.13
+VisualStudioVersion = 17.13.35931.197
 MinimumVisualStudioVersion = 10.0.40219.1
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Chatty.Api", "Chatty.Api\Chatty.Api.csproj", "{7816004E-D734-4A9A-8388-D0619C224F8E}"
 EndProject
 Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "Chatty.UI", "Chatty.UI", "{02EA681E-C7D8-13C7-8484-4AC65E1B71E8}"
 	ProjectSection(SolutionItems) = preProject
-		chat-widget.js = chat-widget.js
-		Test.html = Test.html
+		Chatty.UI\agent-login.html = Chatty.UI\agent-login.html
+		Chatty.UI\agent.html = Chatty.UI\agent.html
+		Chatty.UI\chat-widget.js = Chatty.UI\chat-widget.js
+		Chatty.UI\Test.html = Chatty.UI\Test.html
 	EndProjectSection
 EndProject
 Global
