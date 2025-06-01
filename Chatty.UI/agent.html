@@ -50,7 +50,7 @@
             connection = await new signalR.HubConnectionBuilder()
                 .withUrl(`${API}/chat-hub?role=agent&username=${encodeURIComponent(agentUser)}`)
                 .withAutomaticReconnect()
-                .configureLogging(signalR.LogLevel.Warning)
+                .configureLogging(signalR.LogLevel.None) //None/Critical/Error/Warning/Information/Debug/Trace
                 .build();
 
             await connection.on("PingCheck", () => connection.invoke("PingCheck"));

@@ -210,7 +210,7 @@ class ChattyWidget extends HTMLElement {
             const connection = new signalR.HubConnectionBuilder()
                 .withUrl(`${apiBase}/chat-hub?role=customer&username=${user}&sessionId=${sessionId}`)
                 .withAutomaticReconnect()
-                .configureLogging(signalR.LogLevel.Warning)
+                .configureLogging(signalR.LogLevel.None) //None/Critical/Error/Warning/Information/Debug/Trace
                 .build();
 
             await connection.on("ReceiveMessage", (fromUser, senderRole, message) => {
@@ -219,7 +219,7 @@ class ChattyWidget extends HTMLElement {
             });
 
             await connection.onclose((error) => {
-                console.error("[❌ permanently disconnected]", error);
+                console.log("[❌ permanently disconnected]");
                 showReconnectButton(); // show UI if needed
             });
 
@@ -228,7 +228,7 @@ class ChattyWidget extends HTMLElement {
                 console.log("Connection start")
                 await connection.invoke("JoinSession", sessionId);
             }).catch(err => {
-                console.error("[❌ Failed to start connection]", err);
+                console.log("[❌ Failed to start connection]");
                 showReconnectButton(); // fallback for negotiation failure
             });
 
@@ -274,7 +274,7 @@ class ChattyWidget extends HTMLElement {
                     });
                     messagesDiv.scrollTop = messagesDiv.scrollHeight;
                 } catch (err) {
-                    console.error("Failed to load history:", err);
+                    console.log("Failed to load history:", err);
                 }
                 console.log("launcher.onclick _isNewSession: ", this._isNewSession);
                 const res = await fetch(`${apiBase}/api/sessions/${sessionId}`);
@@ -349,4 +349,12 @@ window.addEventListener("DOMContentLoaded", () => {
 window.addEventListener("beforeunload", () => {
     localStorage.removeItem("chatty_session_id");
     localStorage.removeItem("chatty_user");
+});
+
+window.addEventListener("unhandledrejection", event => {
+    const msg = event.reason?.message || "";
+    if (msg.includes("Failed to fetch") || msg.includes("Failed to complete negotiation")) {
+        console.warn("[⚠️ SignalR reconnect failed silently]");
+        event.preventDefault();
+    }
 });
