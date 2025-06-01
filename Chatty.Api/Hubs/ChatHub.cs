@@ -16,7 +16,6 @@ public class ChatHub : Hub
     private static readonly List<string> SessionOrder = new();
     private static readonly Dictionary<string, string> SessionIpMap = new();
     private static readonly Dictionary<string, string> CustomerConnections = new();
-    private static readonly ConcurrentDictionary<string, string> ConnectedAgentsByUsername = new(); // username => connectionId
     private readonly IServiceScopeFactory _scopeFactory;
     public ChatHub(IChatMessageQueue queue, IAgentSessionTracker agentTracker, IServiceScopeFactory scopeFactory)
     {
@@ -35,14 +34,13 @@ public class ChatHub : Hub
         if (role == "agent" && !string.IsNullOrWhiteSpace(username))
         {
             await Groups.AddToGroupAsync(Context.ConnectionId, "agents");
-            ConnectedAgentsByUsername[username] = Context.ConnectionId;
+            _agentTracker.ConnectedAgentsByUsername[username] = Context.ConnectionId;
             Console.WriteLine($"Agent connected: {username} ({Context.ConnectionId})");
         }
 
-        // ✅ [NEW] Detect new customer session
         if (role == "customer" && !string.IsNullOrWhiteSpace(sessionId))
         {
-            // Track session IP
+            // ✅ Only store IP — no session tracking, no DB logic here
             if (!SessionIpMap.ContainsKey(sessionId))
             {
                 var ipRaw = context?.Connection.RemoteIpAddress?.ToString();
@@ -51,30 +49,6 @@ public class ChatHub : Hub
 
                 if (!string.IsNullOrWhiteSpace(finalIp))
                     SessionIpMap[sessionId] = finalIp!;
-            }
-
-            // If session is new
-            if (!SessionOrder.Contains(sessionId))
-            {
-                SessionOrder.Add(sessionId);
-
-                // Check if already assigned to agent (in-memory or DB)
-                bool isHandled = _agentTracker.AgentSessionsByUsername.Any(pair =>
-                    pair.Value.Contains(sessionId) && ConnectedAgentsByUsername.ContainsKey(pair.Key));
-
-                if (!isHandled)
-                {
-                    using var scope = _scopeFactory.CreateScope();
-                    var db = scope.ServiceProvider.GetRequiredService<ChatDbContext>();
-                    var dbAssigned = await db.AgentSessions.AnyAsync(x => x.SessionId == sessionId);
-
-                    if (!dbAssigned)
-                    {
-                        var label = GenerateSessionLabel(sessionId);
-                        var ip = SessionIpMap.GetValueOrDefault(sessionId, "unknown");
-                        await NotifyAgentNewSession(sessionId, label, ip);
-                    }
-                }
             }
         }
 
@@ -99,7 +73,7 @@ public class ChatHub : Hub
                 }
             }
 
-            ConnectedAgentsByUsername.TryRemove(username, out _);
+            _agentTracker.ConnectedAgentsByUsername.TryRemove(username, out _);
             await Groups.RemoveFromGroupAsync(Context.ConnectionId, "agents");
 
             // ✅ Cleanup DB session assignments
@@ -177,7 +151,7 @@ public class ChatHub : Hub
             }
 
             // ✅ Track active connection
-            ConnectedAgentsByUsername[username] = Context.ConnectionId;
+            _agentTracker.ConnectedAgentsByUsername[username] = Context.ConnectionId;
 
             // ✅ Ensure agent is in group
             await Groups.AddToGroupAsync(Context.ConnectionId, "agents");
@@ -234,15 +208,13 @@ public class ChatHub : Hub
         // ✅ Detect new customer session and notify agent UI
         if (senderRole == "customer" && message.Contains("[System] Chat started"))
         {
-            var isFirstTime = !SessionOrder.Contains(sessionId);
-
-            if (isFirstTime)
+            if (!SessionOrder.Contains(sessionId))
             {
-                SessionOrder.Add(sessionId); // mark as initialized
+                SessionOrder.Add(sessionId);
 
-                // double-check if someone is already assigned (live or stale DB)
+                // check if already assigned in DB
                 bool isHandled = _agentTracker.AgentSessionsByUsername.Any(pair =>
-                    pair.Value.Contains(sessionId) && ConnectedAgentsByUsername.ContainsKey(pair.Key));
+                    pair.Value.Contains(sessionId) && _agentTracker.ConnectedAgentsByUsername.ContainsKey(pair.Key));
 
                 if (!isHandled)
                 {

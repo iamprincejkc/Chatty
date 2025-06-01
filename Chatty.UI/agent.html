@@ -47,14 +47,15 @@
         let connection, sessionId = null;
 
         async function startConnection() {
-            connection = new signalR.HubConnectionBuilder()
+            connection = await new signalR.HubConnectionBuilder()
                 .withUrl(`${API}/chat-hub?role=agent&username=${encodeURIComponent(agentUser)}`)
+                .withAutomaticReconnect()
                 .configureLogging(signalR.LogLevel.Warning)
                 .build();
 
-            connection.on("PingCheck", () => connection.invoke("PingCheck"));
+            await connection.on("PingCheck", () => connection.invoke("PingCheck"));
 
-            connection.on("SessionEnded", id => {
+            await connection.on("SessionEnded", id => {
                 const li = document.querySelector(`[data-session-id="${id}"]`);
                 if (li) li.remove();
 
@@ -66,43 +67,41 @@
                 }
             });
 
-            connection.on("ReceiveMessage", (from, role, msg, incomingId) => {
+
+            await connection.on("ReceiveMessage", (from, role, msg, incomingId) => {
                 if (incomingId !== sessionId || msg.includes("[System]")) return;
                 document.getElementById("typing-indicator").textContent = "";
                 appendMessage(role, msg);
             });
 
-            connection.on("ReceiveTypingText", (incomingId, user, text) => {
+            await connection.on("ReceiveTypingText", (incomingId, user, text) => {
                 if (incomingId !== sessionId) return;
                 const indicator = document.getElementById("typing-indicator");
                 indicator.textContent = text?.trim() ? `${user} is typing: "${text}"` : "";
             });
 
-            connection.on("NewSessionStarted", (id, label, ip) => {
-                const li = document.querySelector(`[data-session-id="${id}"]`);
-                if (li) li.remove();
+            await connection.on("NewSessionStarted", (id, label, ip) => {
+                console.log("NewSessionStarted called");
+                const existing = document.querySelector(`[data-session-id="${id}"]`);
+                if (existing) return; // avoid duplicates
 
-                if (sessionId === id) {
-                    sessionId = null;
-                    localStorage.removeItem("agent_session_id");
-                    document.getElementById("messages").innerHTML = "";
-                    document.getElementById("typing-indicator").textContent = "";
-                }
+                fetch(`${API}/api/sessions/${id}`)
+                    .then(r => r.json())
+                    .then(session => {
+                        console.log("NewSessionStarted", session);
+                        if (session.assignedAgent && session.assignedAgent !== agentUser) return;
 
-                fetch(`${API}/api/sessions/${id}`).then(r => r.json()).then(session => {
-                    if (session.assignedAgent && session.assignedAgent !== agentUser) return;
+                        const li = document.createElement("li");
+                        li.dataset.sessionId = id;
 
-                    const li = document.createElement("li");
-                    li.dataset.sessionId = id;
+                        const btn = document.createElement("button");
+                        btn.textContent = label;
+                        btn.className = "w-full text-left text-sm px-3 py-2 rounded hover:bg-blue-50 text-blue-600";
+                        btn.onclick = () => joinSession(id);
 
-                    const btn = document.createElement("button");
-                    btn.textContent = label;
-                    btn.className = "w-full text-left text-sm px-3 py-2 rounded hover:bg-blue-50 text-blue-600";
-                    btn.onclick = () => joinSession(id);
-
-                    li.appendChild(btn);
-                    document.getElementById("session-list").appendChild(li);
-                });
+                        li.appendChild(btn);
+                        document.getElementById("session-list").appendChild(li);
+                    });
             });
 
             await connection.start();

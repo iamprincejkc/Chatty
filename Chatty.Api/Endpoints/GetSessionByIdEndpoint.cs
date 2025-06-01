@@ -26,15 +26,9 @@ public class GetSessionByIdEndpoint : Endpoint<GetSessionByIdEndpoint.Request, S
     public override async Task HandleAsync(Request req, CancellationToken ct)
     {
         var lastMsg = await _db.ChatMessages
-            .Where(m => m.SessionId == req.SessionId)
-            .OrderByDescending(m => m.SentAt)
-            .FirstOrDefaultAsync(ct);
-
-        if (lastMsg is null)
-        {
-            await SendNotFoundAsync();
-            return;
-        }
+        .Where(m => m.SessionId == req.SessionId)
+        .OrderByDescending(m => m.SentAt)
+        .FirstOrDefaultAsync(ct);
 
         var assignedAgent = await _db.AgentSessions
             .Where(a => a.SessionId == req.SessionId)
@@ -43,10 +37,10 @@ public class GetSessionByIdEndpoint : Endpoint<GetSessionByIdEndpoint.Request, S
 
         var sessionInfo = new SessionInfo
         {
-            SessionId = lastMsg.SessionId,
+            SessionId = req.SessionId,
             AssignedAgent = assignedAgent,
-            IpAddress = lastMsg.IpAddress,
-            Label = lastMsg.User
+            IpAddress = lastMsg?.IpAddress ?? "unknown",
+            Label = lastMsg?.User ?? "New User"
         };
 
         await SendAsync(sessionInfo);

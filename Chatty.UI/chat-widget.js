@@ -205,21 +205,32 @@ class ChattyWidget extends HTMLElement {
         const script = document.createElement("script");
         script.src = "https://cdnjs.cloudflare.com/ajax/libs/microsoft-signalr/7.0.5/signalr.min.js";
 
-        script.onload = () => {
+        script.onload = async () => {
+
             const connection = new signalR.HubConnectionBuilder()
                 .withUrl(`${apiBase}/chat-hub?role=customer&username=${user}&sessionId=${sessionId}`)
+                .withAutomaticReconnect()
                 .configureLogging(signalR.LogLevel.Warning)
                 .build();
 
-            connection.on("ReceiveMessage", (fromUser, senderRole, message) => {
+            await connection.on("ReceiveMessage", (fromUser, senderRole, message) => {
                 if (senderRole === "customer" && message.startsWith("[System]")) return;
                 this.appendMessage(messagesDiv, senderRole, message);
             });
 
-            connection.start().then(async () => {
+            await connection.onclose((error) => {
+                console.error("[❌ permanently disconnected]", error);
+                showReconnectButton(); // show UI if needed
+            });
+
+            await connection.start().then(async () => {
                 launcher.style.display = "flex";
+                console.log("Connection start")
                 await connection.invoke("JoinSession", sessionId);
-            }).catch(console.error);
+            }).catch(err => {
+                console.error("[❌ Failed to start connection]", err);
+                showReconnectButton(); // fallback for negotiation failure
+            });
 
             const sendMessage = async () => {
                 const honeypot = shadow.getElementById("honeypot");
@@ -246,7 +257,9 @@ class ChattyWidget extends HTMLElement {
             launcher.onclick = async () => {
                 widget.style.display = "flex";
                 launcher.style.display = "none";
+                console.log("launcher.onclick called");
 
+                console.log(connection.state);
                 if (connection.state === signalR.HubConnectionState.Connected)
                     await connection.invoke("JoinSession", sessionId);
 
@@ -263,11 +276,12 @@ class ChattyWidget extends HTMLElement {
                 } catch (err) {
                     console.error("Failed to load history:", err);
                 }
+                console.log("launcher.onclick _isNewSession: ", this._isNewSession);
+                const res = await fetch(`${apiBase}/api/sessions/${sessionId}`);
+                const sessionData = await res.json();
+                const noAgent = !sessionData.assignedAgent;
 
-                if (this._isNewSession && connection.state === signalR.HubConnectionState.Connected) {
-                    const label = "New User";
-                    const ipAddress = await fetch("https://api.ipify.org").then(r => r.text()).catch(() => "unknown");
-                    // await connection.invoke("NotifyAgentNewSession", sessionId, label, ipAddress);
+                if (this._isNewSession || noAgent) {
                     await connection.invoke("SendMessage", sessionId, user, "customer", "[System] Chat started");
                     this._isNewSession = false;
                 }
@@ -277,6 +291,17 @@ class ChattyWidget extends HTMLElement {
                 widget.style.display = "none";
                 launcher.style.display = "flex";
             };
+
+            function showReconnectButton() {
+                const newWidget = document.createElement("chatty-widget");
+                document.body.appendChild(newWidget);
+
+                // remove the old one
+                const oldWidget = document.querySelector("chatty-widget");
+                if (oldWidget && oldWidget !== newWidget) {
+                    oldWidget.remove();
+                }
+            }
         };
 
         document.head.appendChild(script);
@@ -300,6 +325,7 @@ class ChattyWidget extends HTMLElement {
     }
 
     getOrCreateSessionId() {
+        // localStorage.removeItem("chat-session-id");      `
         let sessionId = localStorage.getItem("chat-session-id");
         const isNew = !sessionId;
         if (isNew) {
@@ -309,6 +335,7 @@ class ChattyWidget extends HTMLElement {
         this._isNewSession = isNew;
         return sessionId;
     }
+
 }
 
 customElements.define("chatty-widget", ChattyWidget);
